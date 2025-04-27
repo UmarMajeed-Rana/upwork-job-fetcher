@@ -1,0 +1,5 @@
+Flask==3.0.0  # Flask is the web framework you'll use to handle HTTP requests.
+SQLAlchemy==2.0.20  # SQLAlchemy is the ORM for interacting with your database.
+psycopg2-binary==2.9.7  # PostgreSQL adapter for Python (needed for Supabase integration).
+requests==2.31.0  # To handle HTTP requests to the Upwork API.
+python-dotenv==1.0.0  # For loading environment variables from a .env file.
