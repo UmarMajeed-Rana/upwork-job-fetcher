@@ -4,7 +4,7 @@ import time
 import json
 import logging
 from datetime import datetime, timedelta, timezone
-from sqlalchemy import create_engine, Column, String, Integer, Float, Text, DateTime, func
+from sqlalchemy import create_engine, Column, String, Integer, Float, Text, DateTime, func, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, scoped_session
 import requests
@@ -18,7 +18,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 
 
 from datetime import datetime, timedelta, timezone
-from sqlalchemy import create_engine, Column, String, Integer, Float, Text, DateTime, func
+from sqlalchemy import create_engine, Column, String, Integer, Float, Text, DateTime, func, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, scoped_session
 
@@ -28,7 +28,8 @@ host = 'aws-0-us-east-2.pooler.supabase.com'
 port = 6543
 database_name = 'postgres'
 username = 'postgres.wyrxhhpgnyvkpozcpbdz'
-password = 'upwork_job_fetcher_pass12'
+password = 'e2r7rYLqKbzm3LrW6kFOuB7R'
+
 
 DATABASE_URL = f'postgresql://{username}:{password}@{host}:{port}/{database_name}'
 
@@ -102,6 +103,7 @@ class Job(Base):
     JobUpdatedDateTime = Column(DateTime)
     
     JobFirstFetchedDateTime = Column(DateTime, default=func.now())
+    contractor_selection = Column("contractor_selection", Text, nullable=True)
 
 
 class JobFetcher:
@@ -424,7 +426,7 @@ class JobFetcher:
             response = requests.request("POST", url, headers=headers, data=payload)
             response.raise_for_status()
             data = response.json()
-#             print(response, data)
+            logging.info(f"Fetching json {data}")
     #         print(data)
             job_postings = data['data']['marketplaceJobPostingsSearch']['edges']
             page_info = data['data']['marketplaceJobPostingsSearch']['pageInfo']
@@ -447,6 +449,7 @@ class JobFetcher:
         session = self.Session()
         try:
             for record in records:
+                logging.debug(f"inserting job: {record}")
                 job = Job(
                     id=record['id'],
                     title=record['title'],
@@ -504,7 +507,8 @@ class JobFetcher:
                     total_recommended=record['total_recommended'],
                     skills=record['skills'],
                     ciphertext=record['ciphertext'],
-                    JobUpdatedDateTime = datetime.now(timezone.utc)
+                    JobUpdatedDateTime = datetime.now(timezone.utc),
+                    contractor_selection=record['contractor_selection']
                 )
                 session.merge(job)  # Use merge to insert or update records
             session.commit()
@@ -533,6 +537,7 @@ class JobFetcher:
                 activity_stat = job_info['activityStat']
                 applications_bid_stats = activity_stat['applicationsBidStats'] if activity_stat else {}
                 job_activity = activity_stat['jobActivity'] if activity_stat else {}
+                contractor_selection = json.dumps(job_info['contractorSelection'] if job_info['contractorSelection'] else {})
                 ownership_team = job_info['ownership']['team'] if job_info['ownership'] and job_info['ownership']['team'] else {}
                 client_location = node['client']['location'] if node['client'] else {}
 
@@ -554,7 +559,7 @@ class JobFetcher:
                     'enterprise': node['enterprise'],
                     'totalApplicants': node['totalApplicants'],
                     'preferredFreelancerLocation': node['preferredFreelancerLocation'],
-                    'preferredFreelancerLocationMandatory': ",".join(node['preferredFreelancerLocationMandatory']) if node['preferredFreelancerLocationMandatory'] else '',
+                    'preferredFreelancerLocationMandatory':  '',
                     'premium': node['premium'],
                     'client_country': client_location.get('country', None),
                     'client_total_hires': node['client']['totalHires'] if node['client'] else 0,
@@ -594,7 +599,8 @@ class JobFetcher:
                     'total_offered': job_activity.get('totalOffered', None),
                     'total_recommended': job_activity.get('totalRecommended', None),
                     'skills': ', '.join([skill['name'] for skill in node['skills']]) if node['skills'] else None,
-                    'ciphertext': node['ciphertext']
+                    'ciphertext': node['ciphertext'],
+                    'contractor_selection': contractor_selection,
                 }
                 records.append(job_record)
 
@@ -665,19 +671,35 @@ class JobFetcher:
 
 @app.route('/fetch-jobs', methods=['GET'])
 def fetch_jobs():
-    refresh_token = "oauth2v2_fa7be6ac563a65566dbde9c73f4ac738"
-    client_id = "1b8f4294397d9a3e4fa77ebf20f21480"
-    client_secret = "d8ac88986fb31cd6"
+    refresh_token = "oauth2v2_dc00cd5bd56b31a92fd05d242a786757"
+    client_id = "30c1dc1fcd709c4423719e3eb838424b"
+    client_secret = "425b9cdaefc27b19"
     
     
     
     job_fetcher = JobFetcher(DATABASE_URL, client_id, client_secret, refresh_token)
 
+    # category_ids = {
+    # '531770282580668420': [-1],
+    # '531770282580668419': [-1],
+    # '531770282580668418': [-1],
+    # }
+    
     category_ids = {
-    '531770282580668420': [-1],
-    '531770282580668419': [-1],
-    '531770282580668418': [-1],
+        '531770282584862721': [-1],
+        '531770282580668416': [-1],
+        '531770282580668417': [-1],
+        '531770282580668420': [-1],
+        '531770282580668421': [-1],
+        '531770282584862722': [-1],
+        '531770282580668419': [-1],
+        '531770282584862723': [-1],
+        '531770282580668422': [-1],
+        '531770282584862720': [-1],
+        '531770282580668418': [-1],
+        '531770282580668423': [-1],
     }
+
 
     limit = 100
     max_records = 5000
@@ -692,6 +714,30 @@ def fetch_jobs():
     logging.info("Data fetching and storing complete.")  
     
     return jsonify({"status": "success", "message": "Jobs fetched and stored successfully"}), 200
+
+@app.route('/refresh-client-aggregates', methods=['POST'])
+def refresh_client_aggregates():
+    """
+    Endpoint to refresh the client_aggregates materialized view.
+    """
+    try:
+        engine = create_engine(DATABASE_URL)
+        with engine.begin() as connection:
+            # Refresh the materialized view
+            connection.execute(text("REFRESH MATERIALIZED VIEW client_aggregates"))
+        
+        logging.info("Successfully refreshed client_aggregates view")
+        return jsonify({
+            "status": "success",
+            "message": "client_aggregates view refreshed successfully"
+        }), 200
+    
+    except Exception as e:
+        logging.error(f"Error refreshing client_aggregates view: {e}")
+        return jsonify({
+            "status": "error",
+            "message": f"Failed to refresh client_aggregates view: {str(e)}"
+        }), 500
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
