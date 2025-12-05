@@ -35,6 +35,16 @@ DATABASE_URL = f'postgresql://{username}:{password}@{host}:{port}/{database_name
 
 # DATABASE_URL = 'sqlite:///upwork_jobs_sql_25_08_2024__03_20_pkt.db'
 
+# Create a single shared engine with connection pooling
+engine = create_engine(
+    DATABASE_URL,
+    pool_size=10,  # Number of connections to maintain in the pool
+    max_overflow=20,  # Maximum number of connections to create beyond pool_size
+    pool_pre_ping=True,  # Verify connections before using them
+    pool_recycle=3600,  # Recycle connections after 1 hour
+    echo=False  # Set to True for SQL query logging
+)
+
 Base = declarative_base()
 
 class JobToken(Base):
@@ -107,8 +117,9 @@ class Job(Base):
 
 
 class JobFetcher:
-    def __init__(self, database_url, client_id, client_secrect, refresh_token):
-        self.engine = create_engine(database_url)
+    def __init__(self, database_url, client_id, client_secrect, refresh_token, engine=None):
+        # Use provided engine or create a new one (for backward compatibility)
+        self.engine = engine if engine is not None else create_engine(database_url)
         Base.metadata.create_all(self.engine)
         self.Session = scoped_session(sessionmaker(bind=self.engine))
         self.api_token = self.get_token(client_id, client_secrect, refresh_token)
@@ -677,7 +688,7 @@ def fetch_jobs():
     
     
     
-    job_fetcher = JobFetcher(DATABASE_URL, client_id, client_secret, refresh_token)
+    job_fetcher = JobFetcher(DATABASE_URL, client_id, client_secret, refresh_token, engine=engine)
 
     # category_ids = {
     # '531770282580668420': [-1],
@@ -721,7 +732,6 @@ def refresh_client_aggregates():
     Endpoint to refresh the client_aggregates materialized view.
     """
     try:
-        engine = create_engine(DATABASE_URL)
         with engine.begin() as connection:
             # Refresh the materialized view
             connection.execute(text("REFRESH MATERIALIZED VIEW client_aggregates"))
